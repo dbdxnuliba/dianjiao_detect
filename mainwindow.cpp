@@ -6,12 +6,12 @@
 
 #include <QDebug>
 #include <QMessageBox>
-
+#include <QMetaType>
 
 static unsigned int board_NG_cnt;      //OK
 static unsigned int board_OK_cnt;      //NG
 static unsigned int board_ERR_cnt;     //无法识别
-
+static vector<QString> s_image_path_vec;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -21,20 +21,43 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_objThread = nullptr;
     m_file_read_thread = nullptr;
+    m_board_ctrl_thread = nullptr;
     m_template_setting_is_OK = false;
+    m_auto_detec_stop_flag = false;
     m_settingsDialog = new thresholdSetting(this);
     m_templateSet = new DialogTemplateSetting(this);
     action_init();
     widget_init();
 
+    //----------------------注册自定义消息类型-------------------------
+    qRegisterMetaType<vector<cv::Mat>>("vector<cv::Mat> &");
+    qRegisterMetaType<cv::Mat>("cv::Mat &");
+    qRegisterMetaType<vector<cv::Mat>>("vector<cv::Mat>");
+    qRegisterMetaType<cv::Mat>("cv::Mat");
+    qRegisterMetaType<Board_A_detec::Board_A_area_item>("Board_A_detec::Board_A_area_item");
+    qRegisterMetaType<Board_B_detec::Board_B_area_item>("Board_B_detec::Board_B_area_item");
+
     //连接信号槽，当参数设置有变化时及时更新阈值
     connect(m_settingsDialog, &thresholdSetting::update_para_signal, this, &MainWindow::setting_dialog_update);
     connect(m_templateSet, &DialogTemplateSetting::update_para_signal, this, &MainWindow::template_para_changed);
 
+    connect(& m_log, &DetectResLog::write_is_finished, this, [&](){
+        if (false == m_auto_detec_stop_flag){
+            QFile fileTemp(s_image_path_vec.at(0));
+            fileTemp.remove();
+            fileTemp.setFileName(s_image_path_vec.at(1));
+            fileTemp.remove();
+        }
+        s_image_path_vec.clear();
+        m_file_read_thread->file_unlock();
+    });
+
+    startObjThread();
+    start_board_ctrl_thread();
+
     setting_dialog_update();    //使用默认阈值更新目标板检测阈值
     //template_para_changed();    //主动触发一次模板路径更新的槽函数，使用系统默认的路径更新模板
 
-    startObjThread();
 }
 
 MainWindow::~MainWindow()
@@ -45,6 +68,11 @@ MainWindow::~MainWindow()
         m_objThread->quit();
     }
     m_objThread->wait();
+
+    if(m_board_ctrl_thread){
+        m_board_ctrl_thread->quit();
+    }
+    m_board_ctrl_thread->wait();
 }
 
 
@@ -83,9 +111,9 @@ void MainWindow::on_pushButton_clicked()
         //---------------------------------------
 
         cv::Mat img_src = cv::imread(fileName.toStdString());
-        m_board_ctrl.set_image_src(img_src);
-
-        board_detect(num_str);
+        emit set_image_src(img_src);
+        emit run_boart_ctrl_work();
+        ui->lineEdit_num->setText(num_str);
     }
     else{
         if (ui->lineEdit_srcPath_2->text().isEmpty()){
@@ -99,6 +127,8 @@ void MainWindow::on_pushButton_clicked()
             return;
         }
 
+        m_auto_detec_stop_flag = false;
+        s_image_path_vec.clear();
         QDir dir(ui->lineEdit_srcPath->text());
         m_file_read_thread->set_src_dir(dir);
         emit run_file_search_signal();
@@ -122,7 +152,7 @@ void MainWindow::image_disp(const cv::Mat & src, QImage::Format format)
     ui->label->clear();
     ui->label->setPixmap(QPixmap::fromImage(Qtemp));
     ui->label->show();
-    this->repaint();
+
 }
 
 /**
@@ -340,54 +370,10 @@ void MainWindow::board_B_area_disp(const Board_B_detec::Board_B_area_item &area,
     else ui->lineEdit_B13->setStyleSheet("background-color:green");
 }
 
-void MainWindow::board_detect(QString & num_str)
-{
-    QString board_num;
-    Mat image_src;
-
-
-    m_board_res = m_board_ctrl.get_board_res(m_board_info, board_num, image_src);
-    ui->lineEdit_num->setText(num_str);
-
-    ui->label_disp_state_2->setText("数据处理中...耗时较长");
-    cout<<"boadr_info is:"<<m_board_info<<endl;
-    //--------------------------通过获取图片的信息来确定是Ａ面还是Ｂ面---------------------------------
-    if (0 == m_board_info){
-        Board_A_detec::Board_A_area_item area_item;
-        m_board_ctrl.get_board_A_area(area_item);
-        board_A_area_disp(area_item, m_board_res);
-        ui->tabWidget->setCurrentIndex(0);
-        ui->lineEdit_detec_board->setText("A");
-    }
-    else if (1 == m_board_info){
-        Board_B_detec::Board_B_area_item area_item;
-        m_board_ctrl.get_board_B_area(area_item);
-        board_B_area_disp(area_item, m_board_res);
-        ui->tabWidget->setCurrentIndex(1);
-        ui->lineEdit_detec_board->setText("B");
-    }
-    else{
-        //error
-    }
-
-    ui->label_disp_state_2->setText("数据处理完毕，可进行操作");
-    if ((! image_src.empty()) && (-1 != m_board_info)){
-        image_disp(image_src, QImage::Format_BGR888);
-        if (0 == m_board_res){
-            ui->lineEdit_res->setText("OK");
-            ui->lineEdit_res->setStyleSheet("background-color:green");
-        }
-        else{
-            ui->lineEdit_res->setText("NG");
-            ui->lineEdit_res->setStyleSheet("background-color:red");
-        }
-    }
-    else{
-        ui->lineEdit_res->setText("ERR");
-        ui->lineEdit_res->setStyleSheet("background-color:blue");
-    }
-}
-
+/**
+ * @brief MainWindow::startObjThread
+ * //文件搜索线程
+ */
 void MainWindow::startObjThread()
 {
     if(m_objThread){
@@ -409,6 +395,51 @@ void MainWindow::startObjThread()
     });
 
     m_objThread->start();
+}
+
+
+/**
+ * @brief MainWindow::start_board_ctrl_thread
+ * //启动目标板检测线程，该线程用于处理目标板面积检测等耗时程序
+ * //此函数主要是用于连接信号槽，开启线程等初始化工作
+ */
+void MainWindow::start_board_ctrl_thread()
+{
+    if(m_board_ctrl_thread){
+        return;
+    }
+    m_board_ctrl_thread= new QThread();
+    m_board_ctrl = new BoardCtrl();
+    m_board_ctrl->moveToThread(m_board_ctrl_thread);
+
+    connect(m_board_ctrl_thread, &QThread::finished, m_board_ctrl_thread, &QObject::deleteLater);
+    connect(m_board_ctrl_thread, &QThread::finished, m_board_ctrl, &QObject::deleteLater);
+    connect(this, &MainWindow::set_best_radius, m_board_ctrl, &BoardCtrl::set_best_radius);
+    connect(this, &MainWindow::set_image_src, m_board_ctrl, &BoardCtrl::set_image_src);
+    connect(this, &MainWindow::set_rotate_template, m_board_ctrl, &BoardCtrl::set_rotate_template);
+    connect(this, &MainWindow::set_match_template, m_board_ctrl, &BoardCtrl::set_match_template);
+    connect(this, &MainWindow::set_board_B_area, m_board_ctrl, &BoardCtrl::set_board_B_area);
+    connect(this, &MainWindow::set_board_A_area, m_board_ctrl, &BoardCtrl::set_board_A_area);
+    connect(this, &MainWindow::run_boart_ctrl_work, m_board_ctrl, &BoardCtrl::boart_ctrl_main_work);
+
+    connect(m_board_ctrl, &BoardCtrl::board_detec_over, this, &MainWindow::deal_with_board_detect);
+    connect(m_board_ctrl, &BoardCtrl::board_A_area_signal, this, &MainWindow::deal_with_board_A_area);
+    connect(m_board_ctrl, &BoardCtrl::board_B_area_signal, this, &MainWindow::deal_with_board_B_area);
+
+    connect(m_board_ctrl, &BoardCtrl::thread_is_running, this, [&](){
+        if (0 == ui->comboBox->currentIndex()){
+            ui->pushButton->setDisabled(true);
+            ui->label_disp_state_2->setText("数据处理中");
+        }
+    }, Qt::DirectConnection);
+    connect(m_board_ctrl, &BoardCtrl::thread_is_stop, this, [&](){
+        if (0 == ui->comboBox->currentIndex()){
+            ui->pushButton->setEnabled(true);
+            ui->label_disp_state_2->setText("数据处理完毕");
+        }
+    }, Qt::DirectConnection);
+
+    m_board_ctrl_thread->start();
 }
 
 
@@ -447,10 +478,10 @@ void MainWindow::setting_dialog_update()
     Board_B_detec::Board_B_area_item board_B_para;
 
     m_settingsDialog->get_board_A_para(board_A_para);
-    m_board_ctrl.set_board_A_area(board_A_para);
+    emit set_board_A_area(board_A_para);
 
     m_settingsDialog->get_board_B_para(board_B_para);
-    m_board_ctrl.set_board_B_area(board_B_para);
+    emit set_board_B_area(board_B_para);
 }
 
 /**
@@ -483,10 +514,10 @@ void MainWindow::on_pushButton_stop_clicked()
             m_file_read_thread->stop();
         }
     }
+    m_auto_detec_stop_flag = true;
+    m_log.clear_all_flag();
 }
 
-
-static vector<QString> s_image_path_vec;
 
 /**
  * @brief MainWindow::recv_file_path
@@ -496,85 +527,21 @@ static vector<QString> s_image_path_vec;
  */
 void MainWindow::recv_file_path(QString &file_path, QString & num_str)
 {
-    int board_info_1, board_info_2;
-    int res_1,res_2;
-    bool err_flag = false;
-    bool ng_flag = false;
     s_image_path_vec.push_back(file_path);
     num_str.resize(9);
+
+    //检测到同编号的２个文件后，开始对其进行检测
     if (2 == s_image_path_vec.size()){
+        m_board_info.clear();
+        m_board_res.clear();
+        m_log.clear_all_flag();
+        //------------------------开始对第1张图片进行检测-----------------------------
         cv::Mat src_img = imread(s_image_path_vec.at(0).toStdString());
-        m_board_ctrl.set_image_src(src_img);
-        board_detect(num_str);
-
-        if ((-1 != m_board_info)){
-            board_info_1 = m_board_info;
-            res_1 = m_board_res;
-
-            src_img = imread(s_image_path_vec.at(1).toStdString());
-            m_board_ctrl.set_image_src(src_img);
-            board_detect(num_str);
-
-            if (-1 != m_board_info){
-                board_info_2 = m_board_info;
-                res_2 = m_board_res;
-
-                if ((0 == res_1)&&(0 == res_2)){
-                    board_OK_cnt ++;
-                }
-                else{
-                    board_NG_cnt ++;
-                    ng_flag = true;
-                }
-            }
-            else{
-                board_ERR_cnt ++;
-                err_flag = true;
-            }//end if (-1 != m_board_info)
-        }
-        else{
-            board_ERR_cnt ++;
-            err_flag = true;
-        }//end
-
-        ui->lineEdit_detec_num->setText(QString::number(board_NG_cnt + board_OK_cnt + board_ERR_cnt));
-        double ratio = board_OK_cnt * 1.0/(board_NG_cnt+board_ERR_cnt+board_OK_cnt);
-        ui->lineEdit_OK_ratio->setText(QString::number(ratio));
-        ui->lineEdit_detec_err_num->setText(QString::number(board_ERR_cnt));
-
-        {
-            int res_flag = 0;
-            std::vector<double> area_vec;
-            if (err_flag) res_flag = -1;
-            if (ng_flag) res_flag = 1;
-
-            for (int var = 0; var < m_board_A_line_edit_vec.size(); ++var){
-                area_vec.push_back(m_board_A_line_edit_vec.at(var)->text().toDouble());
-            }
-            for (int var = 0; var < m_board_B_line_edit_vec.size(); ++var){
-                area_vec.push_back(m_board_B_line_edit_vec.at(var)->text().toDouble());
-            }
-            m_log.res_write(num_str, res_flag, area_vec);
-        }
-
-
-        //当发生检测异常，且处于自动检测模式下时，将停止继续检测，等待工作人员进行处理
-        if (((err_flag == true) || (ng_flag == true)) && (1 == ui->comboBox->currentIndex())){
-            QMessageBox::warning(this, "警告", tr("电路板编号:%1",
-                                                "检测异常，系统将停止检测请查明原因后再点击＂开始＂按钮，继续检测").arg(num_str));
-            s_image_path_vec.clear();
-            m_file_read_thread->stop();
-            return;
-        }
-
-
-        QFile fileTemp(s_image_path_vec.at(0));
-        fileTemp.remove();
-        fileTemp.setFileName(s_image_path_vec.at(1));
-        fileTemp.remove();
-
-        s_image_path_vec.clear();
-        m_file_read_thread->file_unlock();
+        emit set_image_src(src_img);        //设置需要检测的图片
+        emit run_boart_ctrl_work();         //开始检测
+        ui->lineEdit_num->setText(num_str); //显示编号
+        m_num_str = num_str;
+        m_log.res_write_num_str(num_str);
     }
 }
 
@@ -585,7 +552,7 @@ void MainWindow::recv_file_path(QString &file_path, QString & num_str)
 void MainWindow::template_para_changed()
 {
     double template_ratio = m_templateSet->get_ratio();
-    m_board_ctrl.set_best_radius(m_templateSet->get_radius());  //读取所设置的最佳半径并传递给检测控制类
+    emit set_best_radius(m_templateSet->get_radius());
 
     vector<QString> file_path_vec;
 
@@ -607,7 +574,7 @@ void MainWindow::template_para_changed()
     m_template_setting_is_OK = true;
 
     //------------------------------------读取模板信息---------------------------------
-    cv::Mat rotate_template_img = imread(file_path_vec.at(0).toStdString(), 1);
+    Mat rotate_template_img = imread(file_path_vec.at(0).toStdString(), 1);
     vector<cv::Mat> template_img_vec;
     cv::Mat temp;
     temp = imread(file_path_vec.at(1).toStdString(), 1);
@@ -624,9 +591,184 @@ void MainWindow::template_para_changed()
     template_img_vec.push_back(temp);
 
     cv::resize(rotate_template_img, rotate_template_img, Size(rotate_template_img.cols*template_ratio,rotate_template_img.rows*template_ratio));
-    m_board_ctrl.set_rotate_template(rotate_template_img);
-    m_board_ctrl.set_match_template(template_img_vec);
+    emit set_rotate_template(rotate_template_img);
+    emit set_match_template(template_img_vec);
 }
+
+/**
+ * @brief MainWindow::deal_with_board_detect
+ * //槽函数，处理目标检测结果
+ * @param boadr_info
+ * @param image_mark
+ * @param res
+ */
+void MainWindow::deal_with_board_detect(int boadr_info, const Mat &image_mark, unsigned int res)
+{
+    m_board_info.push_back(boadr_info);
+    m_board_res.push_back(res);
+    //更新检测面
+    if (0 == boadr_info){
+        ui->tabWidget->setCurrentIndex(0);
+        ui->lineEdit_detec_board->setText("A");
+    }
+    else if (1 == boadr_info){
+        ui->tabWidget->setCurrentIndex(1);
+        ui->lineEdit_detec_board->setText("B");
+    }
+    else{
+        ui->lineEdit_res->setText("ERR");
+        ui->lineEdit_res->setStyleSheet("background-color:blue");
+    }
+
+    //显示检测图像和检测结果
+    if ((! image_mark.empty()) && (-1 != boadr_info)){
+        image_disp(image_mark, QImage::Format_BGR888);
+        if (0 == res){
+            ui->lineEdit_res->setText("OK");
+            ui->lineEdit_res->setStyleSheet("background-color:green");
+        }
+        else{
+            ui->lineEdit_res->setText("NG");
+            ui->lineEdit_res->setStyleSheet("background-color:red");
+        }
+    }
+
+    //手动模式下，不进行后续多图检测，当前图片检测完毕直接返回
+    if (0 == ui->comboBox->currentIndex()) return;
+    if (true == m_auto_detec_stop_flag) return;
+
+    //-------------------------------------自动模式下，首张图片检测完毕后，继续进行下一张图片检测-----------------------------------------
+    if (false == m_detec_is_over){
+        m_detec_is_over = true;
+        //------------------------开始对第2张图片进行检测-----------------------------
+        Mat src_img = imread(s_image_path_vec.at(1).toStdString());
+        emit set_image_src(src_img);
+        emit run_boart_ctrl_work();
+    }
+    else{
+        m_detec_is_over = false;
+
+        int res_flag = 0;
+        if ((-1 != m_board_info.at(0)) && (-1 != m_board_info.at(1))){
+            if ((0 == m_board_res.at(0)&&(0 == m_board_res.at(1)))){
+                board_OK_cnt ++;
+                res_flag = 0;
+            }
+            else{
+                board_NG_cnt ++;
+                res_flag = 1;
+            }
+        }
+        else{
+            board_ERR_cnt ++;
+            res_flag = -1;
+        }
+
+        ui->lineEdit_detec_num->setText(QString::number(board_NG_cnt + board_OK_cnt + board_ERR_cnt));
+        double ratio = board_OK_cnt * 1.0/(board_NG_cnt+board_ERR_cnt+board_OK_cnt);
+        ui->lineEdit_OK_ratio->setText(QString::number(ratio));
+        ui->lineEdit_detec_err_num->setText(QString::number(board_ERR_cnt));
+
+        m_log.res_write_board_res(res_flag);
+        {
+
+            std::vector<double> area_vec;
+            std::vector<bool> res_vec;
+            unsigned int res_A ,res_B;
+
+            //确AB板数据
+            if (res_flag >= 0){
+                res_A = (0 == m_board_info.at(0))?m_board_res.at(0):m_board_res.at(1);
+                res_B = (1 == m_board_info.at(0))?m_board_res.at(0):m_board_res.at(1);
+            }
+
+            res_vec.clear();
+            for (int var = 0; var < m_board_A_line_edit_vec.size(); ++var){
+                area_vec.push_back(m_board_A_line_edit_vec.at(var)->text().toDouble());
+                res_vec.push_back((res_A & (1 << var))?true:false);
+            }
+            m_log.res_write_A_area_res(res_vec);
+
+            res_vec.clear();
+            for (int var = 0; var < m_board_B_line_edit_vec.size(); ++var){
+                area_vec.push_back(m_board_B_line_edit_vec.at(var)->text().toDouble());
+                res_vec.push_back((res_B & (1 << var))?true:false);
+            }
+            m_log.res_write_B_area_res(res_vec);
+        }
+
+        //当发生检测异常，且处于自动检测模式下时，将停止继续检测，等待工作人员进行处理
+        if (((res_flag == 1) || (res_flag == -1)) && (1 == ui->comboBox->currentIndex())){
+            m_file_read_thread->stop();
+            m_auto_detec_stop_flag = true;
+            m_log.clear_all_flag();
+            QMessageBox::warning(this, "警告", tr("电路板编号:%1",
+                                                "检测异常，系统将停止检测请查明原因后再点击＂开始＂按钮，继续检测").arg(m_num_str));
+            return;
+        }
+    }
+}
+
+/**
+ * @brief MainWindow::deal_with_board_A_area
+ * //Ａ面面积更新槽函数
+ * @param area_info
+ */
+void MainWindow::deal_with_board_A_area(const Board_A_detec::Board_A_area_item &area_info)
+{
+    board_A_area_disp(area_info, m_board_res.back());
+    vector<double> area_vec;
+    for (unsigned int var = 0; var < area_info.threshold_JALVC164245.size(); ++ var){
+        area_vec.push_back(area_info.threshold_JALVC164245.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_GH137S.size(); ++ var){
+        area_vec.push_back(area_info.threshold_GH137S.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_JDSPF28335.size(); ++ var){
+        area_vec.push_back(area_info.threshold_JDSPF28335.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_SM1040.size(); ++ var){
+        area_vec.push_back(area_info.threshold_SM1040.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_J16H281.size(); ++ var){
+        area_vec.push_back(area_info.threshold_J16H281.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_SM490.size(); ++ var){
+        area_vec.push_back(area_info.threshold_SM490.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_100.size(); ++ var){
+        area_vec.push_back(area_info.threshold_100.at(var));
+    }
+    m_log.res_write_A_area(area_vec);
+}
+
+/**
+ * @brief MainWindow::deal_with_board_B_area
+ * //B面面积更新槽函数
+ * @param area_info
+ */
+void MainWindow::deal_with_board_B_area(const Board_B_detec::Board_B_area_item &area_info)
+{
+    board_B_area_disp(area_info, m_board_res.back());
+    vector<double> area_vec;
+    for (unsigned int var = 0; var < area_info.threshold_GH137S.size(); ++ var){
+        area_vec.push_back(area_info.threshold_GH137S.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_JT6H281.size(); ++ var){
+        area_vec.push_back(area_info.threshold_JT6H281.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_SM1040.size(); ++ var){
+        area_vec.push_back(area_info.threshold_SM1040.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_121.size(); ++ var){
+        area_vec.push_back(area_info.threshold_121.at(var));
+    }
+    for (unsigned int var = 0; var < area_info.threshold_100.size(); ++ var){
+        area_vec.push_back(area_info.threshold_100.at(var));
+    }
+    m_log.res_write_B_area(area_vec);
+}
+
 
 void MainWindow::error_info_with_err_detect()
 {
@@ -651,5 +793,5 @@ void MainWindow::clear_detec_res()
     ui->lineEdit_num->setText("");
     ui->lineEdit_res->setText("");
     ui->lineEdit_res->setStyleSheet("background-color:gray");
-    this->repaint();
+
 }

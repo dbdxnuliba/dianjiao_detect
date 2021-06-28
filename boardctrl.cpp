@@ -1,11 +1,20 @@
 #include "boardctrl.h"
-
-
-static void get_rotate_degrees(Mat src, Mat temp, double & degrees);
+#include <QMetaType>
 
 BoardCtrl::BoardCtrl()
 {
     m_radius = 80;
+
+    //----------------------注册自定义消息类型-------------------------
+    qRegisterMetaType<QString>("QString");
+    qRegisterMetaType<cv::Mat>("cv::Mat");
+    qRegisterMetaType<cv::Mat>("cv::Mat &");
+    qRegisterMetaType<Mat>("Mat &");
+    qRegisterMetaType<Mat>("Mat");
+    qRegisterMetaType<unsigned int>("unsigned int");
+    qRegisterMetaType<int>("int");
+    qRegisterMetaType<Board_A_detec::Board_A_area_item>("Board_A_detec::Board_A_area_item");
+    qRegisterMetaType<Board_B_detec::Board_B_area_item>("Board_B_detec::Board_B_area_item");
 }
 
 BoardCtrl::~BoardCtrl()
@@ -14,46 +23,53 @@ BoardCtrl::~BoardCtrl()
 }
 
 /**
- * @brief BoardCtrl::get_board_res
- * //获取目标图像检测结果
- * @param boadr_info
- * //保存图像信息，0,Ａ面;1,Ｂ面;(-1)未识别图像
- * @param board_num
- * //保存当前图像所识别的编号信息，只对Ａ面有效
- * @return
- * //每个bit表示一个区域的检测结果,1,NG;0,OK
+ * @brief BoardCtrl::boart_ctrl_main_work
+ * //目标面积检测主函数，用于执行目标板面积检测
  */
-unsigned int BoardCtrl::get_board_res(int &boadr_info, QString &board_num, Mat & image_mark)
+void BoardCtrl::boart_ctrl_main_work()
 {
     cv::Mat dst_imag;
     Point2f origin;
     unsigned int res = 0;
     int ret = 0;
 
+    emit thread_is_running();
     //首先对输入图像进行霍夫圆孔定位，若不能检测到圆孔，则将其按照Ｂ面进行处理，若仍返回错误，则boadr_info＝（－１），表示无法识别图像信息
     ret = board_A_pre_deal(m_image_src, dst_imag, origin);
     if (ret < 0){
         ret = board_B_pre_deal(m_image_src, dst_imag, origin);
         if (ret < 0){
-            boadr_info = -1;
+            m_board_info = -1;
         }
         else{
             res = m_board_B.get_board_B_res(dst_imag, origin);
-            boadr_info = 1;
+            m_board_info = 1;
         }
     }
     else{
         res = m_board_A.get_board_A_res(dst_imag, origin);
         //m_board_A.read_numbers(dst_imag, board_num, origin);
-        boadr_info = 0;
+        m_board_info = 0;
     }
 
-    if (boadr_info >= 0){
-        image_mark = Mat(dst_imag, Rect(0,0,2200, 1700));                           //裁剪出目标区域
+    if (m_board_info >= 0){
+        m_image_mark = Mat(dst_imag, Rect(0,0,2200, 1700));                           //裁剪出目标区域
     }
 
+    //----------------------检测完毕，通过信号发送相应的检测记结果---------------------------
+    emit board_detec_over(m_board_info, m_image_mark, res);
+    if (0 == m_board_info){
+        Board_A_detec::Board_A_area_item area_info;
+        m_board_A.get_area(area_info);
+        emit board_A_area_signal(area_info);
+    }
+    else if (1 == m_board_info){
+        Board_B_detec::Board_B_area_item area_info;
+        m_board_B.get_area(area_info);
+        emit board_B_area_signal(area_info);
+    }
 
-    return res;
+    emit thread_is_stop();
 }
 
 /**

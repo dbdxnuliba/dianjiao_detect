@@ -199,7 +199,7 @@
      </sizepolicy>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>1</number>
     </property>
     <widget class="QWidget" name="tab_3">
      <attribute name="title">
@@ -1084,7 +1084,7 @@
              </sizepolicy>
             </property>
             <property name="text">
-             <string>1</string>
+             <string>13</string>
             </property>
            </widget>
            <widget class="QLineEdit" name="lineEdit_B13"/>
