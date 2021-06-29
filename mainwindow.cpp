@@ -8,10 +8,19 @@
 #include <QMessageBox>
 #include <QMetaType>
 
+#include <QPalette>
+
 static unsigned int board_NG_cnt;      //OK
 static unsigned int board_OK_cnt;      //NG
 static unsigned int board_ERR_cnt;     //无法识别
 static vector<QString> s_image_path_vec;
+
+static inline void set_line_edit_text_color(QLineEdit * line_edit)
+{
+    QPalette pal = line_edit->palette();
+    pal.setColor(QPalette::Text, QColor(0,0,0));
+    line_edit->setPalette(pal);
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -186,15 +195,32 @@ void MainWindow::action_init()
 void MainWindow::widget_init()
 {
     ui->lineEdit_srcPath->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_srcPath);
+
     ui->lineEdit_detec_board->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_detec_board);
+
     ui->lineEdit_num->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_num);
+
     ui->lineEdit_res->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_res);
+
     ui->lineEdit_OK_ratio->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_OK_ratio);
+
     ui->lineEdit_detec_err_num->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_detec_err_num);
+
     ui->lineEdit_detec_num->setDisabled(true);
+    set_line_edit_text_color(ui->lineEdit_detec_num);
 
     ui->label_disp_state->setText("");
     ui->label_disp_state_2->setText("");
+
+    QPalette pal = ui->lineEdit_num->palette();
+    pal.setColor(QPalette::Text, QColor(0,0,0));
+    ui->lineEdit_num->setPalette(pal);
 
     m_board_A_line_edit_vec.clear();
     m_board_A_line_edit_vec.append(ui->lineEdit_A1);
@@ -241,9 +267,11 @@ void MainWindow::widget_init()
 
     for (int var = 0; var < m_board_A_line_edit_vec.size(); ++var){
         m_board_A_line_edit_vec.at(var)->setDisabled(true);
+        set_line_edit_text_color(m_board_A_line_edit_vec.at(var));
     }
     for (int var = 0; var < m_board_B_line_edit_vec.size(); ++var){
         m_board_B_line_edit_vec.at(var)->setDisabled(true);
+        set_line_edit_text_color(m_board_B_line_edit_vec.at(var));
     }
 }
 
