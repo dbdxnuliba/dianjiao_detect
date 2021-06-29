@@ -236,6 +236,8 @@ int rotateImage2(Mat img,Mat & imgout, double degree)
         int y = (imgout.rows - targetSize.height) / 2;
         Rect rect(x, y, targetSize.width, targetSize.height);
         imgout = Mat(imgout,rect);
+
+        return 0;
 }
 
 void get_text_origin(const Point2f &origin, const Point &left_behind_pt, const Point &right_below_pt, Point &text_origin)
@@ -452,4 +454,5 @@ int highlight_remove_Chi(cv::Mat* src,cv::Mat* dst,double Re)
             dstData[j*3+2]=B-(unsigned char)(temp+0.5);
         }
    }
+    return 0;
 }

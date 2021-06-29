@@ -24,6 +24,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_board_ctrl_thread = nullptr;
     m_template_setting_is_OK = false;
     m_auto_detec_stop_flag = false;
+    m_detec_is_over = false;
     m_settingsDialog = new thresholdSetting(this);
     m_templateSet = new DialogTemplateSetting(this);
     action_init();

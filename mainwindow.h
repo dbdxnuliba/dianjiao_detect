@@ -83,7 +83,6 @@ private:
 
     bool m_template_setting_is_OK;
     bool m_detec_is_over;       //检测结束标志
-    bool m_area_is_ready;       //检测面积已更新标志
     bool m_auto_detec_stop_flag;
     QVector<QLineEdit *> m_board_A_line_edit_vec;
     QVector<QLineEdit *> m_board_B_line_edit_vec;
