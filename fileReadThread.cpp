@@ -1,6 +1,7 @@
 #include "fileReadThread.h"
 
 #include <iostream>
+#include <QApplication>
 
 
 FileReadThread::FileReadThread(QObject *parent):QObject(parent)
@@ -62,8 +63,10 @@ void FileReadThread::run_read_file_thread()
                         }
                     }
                     if (0 != end_index){
+
                         QString file_path = file_list.at(start_index).absoluteFilePath();
                         emit find_file_path_signal(file_path, board_num);
+
                         file_path = file_list.at(end_index).absoluteFilePath();
                         emit find_file_path_signal(file_path, board_num);
 

@@ -6,6 +6,8 @@
 
 #include "iostream"
 
+#include "QCoreApplication"
+
 using namespace std;
 
 const QString local_key_arr[7] = {"Template_B_path", "Template_1_path", "Template_2_path", "Template_3_path"\
@@ -41,8 +43,10 @@ DialogTemplateSetting::DialogTemplateSetting(QWidget *parent) :
 //    m_template_arr[3] = QString("/home/panhan/Desktop/template/temp3.jpg");
 //    m_template_arr[4] = QString("/home/panhan/Desktop/template/temp4.jpg");
 
+    QString local_path = QCoreApplication::applicationDirPath();
+    local_path += QString("/Config.ini");
 
-    QSettings* cfg = new QSettings("/home/panhan/Desktop/template/Config.ini", QSettings::IniFormat);
+    QSettings* cfg = new QSettings(local_path, QSettings::IniFormat);
     cfg->beginGroup("TemplaetSetting");
 
     for (int var = 0; var < 5; ++var) {

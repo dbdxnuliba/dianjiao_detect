@@ -43,10 +43,22 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(& m_log, &DetectResLog::write_is_finished, this, [&](){
         if (false == m_auto_detec_stop_flag){
-            QFile fileTemp(s_image_path_vec.at(0));
-            fileTemp.remove();
-            fileTemp.setFileName(s_image_path_vec.at(1));
-            fileTemp.remove();
+            QString local_path = QCoreApplication::applicationDirPath();
+            QDir local_dir = QDir(local_path + "/pic_copy");
+            if (! local_dir.exists()){
+                local_dir.mkdir(local_path + "/pic_copy");
+            }
+
+            QFileInfo file_info(s_image_path_vec.at(0));
+            QFile file;
+            file.setFileName(s_image_path_vec.at(0));
+            file.copy(local_path + "/pic_copy" + "/" + file_info.fileName());
+            file.remove();
+
+            file_info = QFileInfo(s_image_path_vec.at(1));
+            file.setFileName(s_image_path_vec.at(1));
+            file.copy(local_path + "/pic_copy" + "/" + file_info.fileName());
+            file.remove();
         }
         s_image_path_vec.clear();
         m_file_read_thread->file_unlock();
@@ -427,16 +439,12 @@ void MainWindow::start_board_ctrl_thread()
     connect(m_board_ctrl, &BoardCtrl::board_B_area_signal, this, &MainWindow::deal_with_board_B_area);
 
     connect(m_board_ctrl, &BoardCtrl::thread_is_running, this, [&](){
-        if (0 == ui->comboBox->currentIndex()){
             ui->pushButton->setDisabled(true);
             ui->label_disp_state_2->setText("数据处理中");
-        }
     }, Qt::DirectConnection);
     connect(m_board_ctrl, &BoardCtrl::thread_is_stop, this, [&](){
-        if (0 == ui->comboBox->currentIndex()){
             ui->pushButton->setEnabled(true);
             ui->label_disp_state_2->setText("数据处理完毕");
-        }
     }, Qt::DirectConnection);
 
     m_board_ctrl_thread->start();
